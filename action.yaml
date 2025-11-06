@@ -116,6 +116,7 @@ runs:
     # --- Export CD_ROOT ---
     - name: Export CD_ROOT
       id: cdroot
+      shell: bash
       run: |
         CD_ROOT="continuous-deployment/${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}"
         echo "CD_ROOT=$CD_ROOT" >> "$GITHUB_ENV"
