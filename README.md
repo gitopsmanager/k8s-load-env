@@ -128,6 +128,28 @@ This action is used by higher-level workflows such as:
 
 ---
 
+
+## 🔢 Versioning Policy — Official Release
+
+Starting with this release, all future versions follow the new **stable semantic tagging policy**.
+
+Previously, tags like `v1`, `v1.4`, and `v1.4.7` might have moved unpredictably.  
+From now on, they will always follow these simple, reliable rules:
+
+| Tag | Moves When | Purpose |
+|------|-------------|----------|
+| **`v1`** | Any new release in the `v1.x.x` series | Always points to the latest stable release in the major version line. |
+| **`v1.4`** | A new patch in the same minor version (e.g. `v1.4.7 → v1.4.8`) | Stays within that feature line. Receives only bug fixes and optimizations — no breaking changes. |
+| **`v1.4.7`** | Never | Fully immutable and reproducible. |
+
+### How to choose
+- **`@v1`** → Always up to date with the newest non-breaking changes.  
+- **`@v1.4`** → Stable feature line with fixes only.  
+- **`@v1.4.7`** → Frozen snapshot for exact reproducibility.
+
+All tags will now **increment forward permanently** — no re-use or re-tagging of old versions.  
+This marks the **official release** of the action under the **Affinity7 Consulting** stable versioning model.
+
 ## 🧩 Dependencies
 
 | Action | Description | Repository |
