@@ -1,0 +1,186 @@
+name: Load Environment Config
+description: >
+  Parse an env_map JSON definition, select the target cluster, export CD_ROOT, 
+  and flatten the UAMI map (uami_name → client_id). 
+  Provides cluster, dns_zone, and UAMI mapping for downstream steps.
+
+author: Affinity7 Consulting Ltd
+branding:
+  icon: cloud
+  color: blue
+
+inputs:
+  env_map:
+    description: "Inline JSON env_map defining environments, clusters, dns_zones, and UAMI maps."
+    required: false
+  target_environment:
+    description: "Logical environment name (e.g. prod, qa)."
+    required: true
+  target_cluster:
+    description: "Optional cluster override to directly select a cluster."
+    required: false
+  namespace:
+    description: "Kubernetes namespace for the deployment context."
+    required: true
+  delete_only:
+    description: "Skip UAMI export if true."
+    required: false
+    default: "false"
+
+outputs:
+  cluster:
+    description: "Selected cluster name."
+  dns_zone:
+    description: "DNS zone for the selected cluster."
+  container_registry:
+    description: "Container registry for the cluster."
+  uami_vars:
+    description: "Flattened UAMI name → client_id JSON mapping."
+  cd_root:
+    description: "Continuous-deployment repo path for the selected cluster/namespace."
+
+runs:
+  using: composite
+  steps:
+    # --- Parse env_map and select cluster ---
+    - name: Load environment config (JSON)
+      id: env
+      uses: actions/github-script@v7
+      env:
+        INLINE_ENV_MAP: ${{ inputs.env_map }}
+        ENV_MAP: ${{ env.ENV_MAP }}
+        ENVIRONMENT: ${{ inputs.target_environment }}
+        CLUSTER_IN: ${{ inputs.target_cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const sourceInput = (process.env.INLINE_ENV_MAP || '').trim();
+          const sourceEnv   = (process.env.ENV_MAP || '').trim();
+          const raw = sourceInput || sourceEnv;
+
+          if (!raw) {
+            core.setFailed('❌ No env_map provided. Pass inputs.env_map OR set ENV_MAP.');
+            return;
+          }
+          let map;
+          try { map = JSON.parse(raw); }
+          catch (err) { core.setFailed(`❌ env_map invalid JSON: ${err.message}`); return; }
+
+          const envName   = (process.env.ENVIRONMENT || '').trim();
+          const clusterIn = (process.env.CLUSTER_IN || '').trim();
+          let selected;
+
+          if (clusterIn) {
+            const allClusters = Object.entries(map)
+              .flatMap(([env, val]) => (val.clusters || []).map(c => ({ ...c, __env: env })));
+            selected = allClusters.find(c => String(c.cluster).toLowerCase() === clusterIn.toLowerCase());
+            if (!selected) {
+              const available = allClusters.map(c => `${c.cluster} (env=${c.__env})`);
+              core.setFailed(`❌ target_cluster '${clusterIn}' not found. Available: ${available.join(', ')}`);
+              return;
+            }
+            core.info(`Cluster override: using cluster '${selected.cluster}' (env='${selected.__env}')`);
+          } else {
+            if (!Object.hasOwn(map, envName)) {
+              core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
+              return;
+            }
+            const entry = map[envName];
+            if (!Array.isArray(entry.clusters) || entry.clusters.length === 0) {
+              core.setFailed(`❌ env_map['${envName}'].clusters missing or empty.`);
+              return;
+            }
+            if (entry.clusters.length > 1) {
+              const names = entry.clusters.map(c => c.cluster).filter(Boolean);
+              core.setFailed(`❌ Multiple clusters in '${envName}'. Provide target_cluster. Options: ${names.join(', ')}`);
+              return;
+            }
+            selected = entry.clusters[0];
+            core.info(`Selected cluster '${selected.cluster}' from env '${envName}'.`);
+          }
+
+          const cluster = String(selected.cluster || '');
+          const dnsZone = String(selected.dns_zone || '');
+          const registry = String(selected.container_registry || '');
+          const uami = Array.isArray(selected.uami_map) ? selected.uami_map : [];
+
+          if (!cluster) { core.setFailed('❌ Selected cluster name empty.'); return; }
+          if (!dnsZone) { core.setFailed(`❌ Cluster '${cluster}' missing dns_zone.`); return; }
+
+          core.setOutput('cluster', cluster);
+          core.setOutput('dns_zone', dnsZone);
+          core.setOutput('container_registry', registry);
+          core.setOutput('uami_map', JSON.stringify(uami));
+          core.setOutput('namespace', process.env.NAMESPACE);
+
+    # --- Export CD_ROOT ---
+    - name: Export CD_ROOT
+      id: cdroot
+      run: |
+        CD_ROOT="continuous-deployment/${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}"
+        echo "CD_ROOT=$CD_ROOT" >> "$GITHUB_ENV"
+        echo "cd_root=$CD_ROOT" >> "$GITHUB_OUTPUT"
+
+    # --- Export UAMI vars ---
+    - name: Export UAMI env vars (uami_name → client_id)
+      id: uami
+      if: ${{ inputs.delete_only == 'false' }}
+      uses: actions/github-script@v7
+      env:
+        UAMI_JSON: ${{ steps.env.outputs.uami_map }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+      with:
+        script: |
+          const clusterName = (process.env.CLUSTER || '').trim();
+          let arr = [];
+          try { arr = JSON.parse(process.env.UAMI_JSON || '[]'); }
+          catch { core.setFailed('❌ Invalid uami_map JSON'); return; }
+
+          if (!Array.isArray(arr) || arr.length === 0) {
+            core.info('No UAMI entries found.');
+            core.setOutput("uami_vars", "{}");
+            return;
+          }
+
+          const seen = new Set();
+          const exported = {};
+
+          for (const [i, u] of arr.entries()) {
+            let name = String(u.uami_name || '').trim();
+            const cid  = String(u.client_id || '').trim();
+            const rg   = String(u.uami_resource_group || '').trim();
+
+            if (!name || !cid) {
+              core.warning(`Skipping UAMI index ${i}: missing uami_name or client_id.`);
+              continue;
+            }
+
+            const prefix = clusterName + "-";
+            if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
+              name = name.substring(prefix.length);
+            }
+
+            let varName = name.replace(/-/g, "_");
+            if (!/^[A-Za-z_]/.test(varName)) varName = `_${varName}`;
+            if (seen.has(varName)) {
+              core.warning(`Duplicate UAMI var '${varName}' (rg='${rg}'). Skipping duplicate.`);
+              continue;
+            }
+
+            exported[varName.toLowerCase()] = cid;
+            seen.add(varName);
+          }
+
+          core.setOutput("uami_vars", JSON.stringify(exported));
+          core.info("UAMI vars exported:");
+          core.info(JSON.stringify(exported, null, 2));
+
+    # --- Re-export combined outputs for parent workflow ---
+    - name: Set final outputs
+      shell: bash
+      run: |
+        echo "cluster=${{ steps.env.outputs.cluster }}" >> "$GITHUB_OUTPUT"
+        echo "dns_zone=${{ steps.env.outputs.dns_zone }}" >> "$GITHUB_OUTPUT"
+        echo "container_registry=${{ steps.env.outputs.container_registry }}" >> "$GITHUB_OUTPUT"
+        echo "uami_vars=${{ steps.uami.outputs.uami_vars }}" >> "$GITHUB_OUTPUT"
+        echo "cd_root=${{ steps.cdroot.outputs.cd_root }}" >> "$GITHUB_OUTPUT"
