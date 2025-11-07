@@ -194,6 +194,6 @@ runs:
         echo "cluster=${{ steps.env.outputs.cluster }}" >> "$GITHUB_OUTPUT"
         echo "dns_zone=${{ steps.env.outputs.dns_zone }}" >> "$GITHUB_OUTPUT"
         echo "container_registry=${{ steps.env.outputs.container_registry }}" >> "$GITHUB_OUTPUT"
-        echo "uami_vars=${{ steps.uami.outputs.uami_vars_b64 }}" >> "$GITHUB_OUTPUT"
+        echo "uami_vars_b64=${{ steps.uami.outputs.uami_vars_b64 }}" >> "$GITHUB_OUTPUT"
         echo "cd_root=${{ steps.cdroot.outputs.cd_root }}" >> "$GITHUB_OUTPUT"
 
