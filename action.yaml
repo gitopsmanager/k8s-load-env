@@ -39,7 +39,7 @@ outputs:
     value: ${{ steps.set_outputs.outputs.container_registry }}
   uami_vars:
     description: "Flattened UAMI name → client_id map"
-    value: ${{ toJSON(steps.set_outputs.outputs.uami_vars) }}
+    value: ${{ toJson(steps.set_outputs.outputs.uami_vars) }}
   cd_root:
     description: "Continuous deployment repo path"
     value: ${{ steps.set_outputs.outputs.cd_root }}
