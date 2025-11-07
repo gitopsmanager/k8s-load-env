@@ -39,7 +39,7 @@ outputs:
     value: ${{ steps.set_outputs.outputs.container_registry }}
   uami_vars:
     description: "Flattened UAMI name → client_id map"
-    value: ${{ toJson(steps.set_outputs.outputs.uami_vars) }}
+    value: ${{ steps.set_outputs.outputs.uami_vars }}
   cd_root:
     description: "Continuous deployment repo path"
     value: ${{ steps.set_outputs.outputs.cd_root }}
@@ -178,9 +178,13 @@ runs:
             seen.add(varName);
           }
 
-          core.setOutput("uami_vars", JSON.stringify(exported));
-          core.info("UAMI vars exported:");
-          core.info(JSON.stringify(exported, null, 2));
+
+          const encoded = Buffer.from(JSON.stringify(exported)).toString('base64');
+          core.setOutput("uami_vars_b64", encoded);
+          core.info("UAMI vars exported (base64):");
+          core.info(encoded);
+
+
 
     # --- Re-export combined outputs for parent workflow ---
     - name: Set final outputs
@@ -190,6 +194,6 @@ runs:
         echo "cluster=${{ steps.env.outputs.cluster }}" >> "$GITHUB_OUTPUT"
         echo "dns_zone=${{ steps.env.outputs.dns_zone }}" >> "$GITHUB_OUTPUT"
         echo "container_registry=${{ steps.env.outputs.container_registry }}" >> "$GITHUB_OUTPUT"
-        echo "uami_vars=${{ steps.uami.outputs.uami_vars }}" >> "$GITHUB_OUTPUT"
+        echo "uami_vars=${{ steps.uami.outputs.uami_vars_b64 }}" >> "$GITHUB_OUTPUT"
         echo "cd_root=${{ steps.cdroot.outputs.cd_root }}" >> "$GITHUB_OUTPUT"
 
