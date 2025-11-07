@@ -37,9 +37,9 @@ outputs:
   container_registry:
     description: "Cluster container registry"
     value: ${{ steps.set_outputs.outputs.container_registry }}
-  uami_vars:
-    description: "Flattened UAMI name → client_id map"
-    value: ${{ steps.set_outputs.outputs.uami_vars }}
+  uami_vars_b64:
+    description: "Flattened UAMI name → client_id map base64 encoded"
+    value: ${{ steps.set_outputs.outputs.uami_vars_b64 }}
   cd_root:
     description: "Continuous deployment repo path"
     value: ${{ steps.set_outputs.outputs.cd_root }}
