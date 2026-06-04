@@ -51,7 +51,7 @@ runs:
     # --- Parse env_map and select cluster ---
     - name: Load environment config (JSON)
       id: env
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         INLINE_ENV_MAP: ${{ inputs.env_map }}
         ENV_MAP: ${{ env.ENV_MAP }}
@@ -132,7 +132,7 @@ runs:
     - name: Export UAMI env vars (uami_name → client_id)
       id: uami
       if: ${{ inputs.delete_only == 'false' }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         UAMI_JSON: ${{ steps.env.outputs.uami_map }}
         CLUSTER: ${{ steps.env.outputs.cluster }}
