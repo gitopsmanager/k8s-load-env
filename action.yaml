@@ -19,6 +19,12 @@ inputs:
   target_cluster:
     description: "Optional cluster override to directly select a cluster."
     required: false
+  target_cloud:
+    description: >
+      Optional cloud (aws | azure) used to choose between clusters of the same
+      environment. Ignored when target_cluster is given. When omitted, the
+      runner's own cloud breaks a tie, never vetoes a choice.
+    required: false
   namespace:
     description: "Kubernetes namespace for the deployment context."
     required: true
@@ -43,11 +49,27 @@ outputs:
   cd_root:
     description: "Continuous deployment repo path"
     value: ${{ steps.set_outputs.outputs.cd_root }}
+  cloud:
+    description: "Selected cluster's cloud (aws | azure), empty for an env_map that does not declare one"
+    value: ${{ steps.set_outputs.outputs.cloud }}
 
 
 runs:
   using: composite
   steps:
+    # --- Which cloud is this runner in? ---
+    #
+    # Run unconditionally and use the answer only when a choice has to be made.
+    # One IMDS call with a short timeout, against a workflow measured in
+    # minutes, in exchange for a single code path below.
+    #
+    # It is a TIE-BREAK, never a veto: a runner with a VPN to the other cloud
+    # deploys there legitimately, so nothing here compares the runner's cloud
+    # against the cluster that was chosen by name or by target_cloud.
+    - name: Detect runner cloud
+      id: cloud
+      uses: gitopsmanager/detect-cloud@v1
+
     # --- Parse env_map and select cluster ---
     - name: Load environment config (JSON)
       id: env
@@ -57,6 +79,8 @@ runs:
         ENV_MAP: ${{ env.ENV_MAP }}
         ENVIRONMENT: ${{ inputs.target_environment }}
         CLUSTER_IN: ${{ inputs.target_cluster }}
+        CLOUD_IN: ${{ inputs.target_cloud }}
+        CLOUD_DETECTED: ${{ steps.cloud.outputs.provider }}
         NAMESPACE: ${{ inputs.namespace }}
       with:
         script: |
@@ -74,7 +98,14 @@ runs:
 
           const envName   = (process.env.ENVIRONMENT || '').trim();
           const clusterIn = (process.env.CLUSTER_IN || '').trim();
+          const cloudIn   = (process.env.CLOUD_IN || '').trim().toLowerCase();
+          const detected  = (process.env.CLOUD_DETECTED || '').trim().toLowerCase();
           let selected;
+
+          // An env_map written before clusters declared a cloud returns ''.
+          // Every rule below treats that as "unknown", never as "no match",
+          // so an older map resolves exactly as it always did.
+          const cloudOf = c => String(c.cloud || '').trim().toLowerCase();
 
           if (clusterIn) {
             const allClusters = Object.entries(map)
@@ -86,6 +117,14 @@ runs:
               return;
             }
             core.info(`Cluster override: using cluster '${selected.cluster}' (env='${selected.__env}')`);
+            // target_cluster names one cluster, so there is nothing left to
+            // choose and nothing to fail on. Said out loud rather than ignored
+            // silently, because the two inputs disagree about a real thing.
+            if (cloudIn && cloudOf(selected) && cloudOf(selected) !== cloudIn) {
+              core.warning(
+                `target_cloud='${cloudIn}' ignored: target_cluster '${selected.cluster}' ` +
+                `is in ${cloudOf(selected)}.`);
+            }
           } else {
             if (!Object.hasOwn(map, envName)) {
               core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
@@ -96,12 +135,56 @@ runs:
               core.setFailed(`❌ env_map['${envName}'].clusters missing or empty.`);
               return;
             }
-            if (entry.clusters.length > 1) {
-              const names = entry.clusters.map(c => c.cluster).filter(Boolean);
-              core.setFailed(`❌ Multiple clusters in '${envName}'. Provide target_cluster. Options: ${names.join(', ')}`);
+            let candidates = entry.clusters;
+
+            // 1. target_cloud, when given, is the user stating which one they
+            //    want. A row that does not declare its cloud is kept: a filter
+            //    may only narrow what is already known, never discard a cluster
+            //    on the strength of a field its env_map never had.
+            if (cloudIn) {
+              const narrowed = candidates.filter(c => !cloudOf(c) || cloudOf(c) === cloudIn);
+              if (narrowed.length === 0) {
+                const clouds = [...new Set(candidates.map(cloudOf).filter(Boolean))];
+                core.setFailed(
+                  `❌ No cluster in '${envName}' is in cloud '${cloudIn}'. ` +
+                  `That environment has: ${clouds.join(', ')}.`);
+                return;
+              }
+              candidates = narrowed;
+            }
+
+            // 2. Still a choice to make, and nobody said which. The runner's own
+            //    cloud breaks the tie -- and ONLY breaks a tie: it is never
+            //    consulted when there is one cluster, so deploying across a VPN
+            //    to the other cloud is unaffected.
+            if (candidates.length > 1 && !cloudIn && detected && detected !== 'unknown') {
+              const narrowed = candidates.filter(c => cloudOf(c) === detected);
+              if (narrowed.length === 1) {
+                core.warning(
+                  `Environment '${envName}' has clusters in more than one cloud. ` +
+                  `Selected '${narrowed[0].cluster}' because this runner is in ${detected}. ` +
+                  `Pass target_cloud or target_cluster to choose explicitly.`);
+                candidates = narrowed;
+              }
+            }
+
+            if (candidates.length > 1) {
+              const opts = candidates.map(c => cloudOf(c) ? `${c.cluster} (${cloudOf(c)})` : String(c.cluster))
+                                     .filter(Boolean);
+              // Asking again for something already supplied is a dead end. When
+              // no entry declares a cloud, target_cloud CANNOT narrow anything,
+              // and the map is the thing to fix -- it predates the field.
+              const declaresCloud = candidates.some(c => cloudOf(c));
+              const advice = declaresCloud
+                ? 'Provide target_cluster or target_cloud.'
+                : 'This env_map declares no cloud on its clusters, so target_cloud cannot choose ' +
+                  'between them. Provide target_cluster, or regenerate the env_map from a version ' +
+                  'of GitOps Manager that writes it.';
+              core.setFailed(`❌ Multiple clusters in '${envName}'. ${advice} Options: ${opts.join(', ')}`);
               return;
             }
-            selected = entry.clusters[0];
+
+            selected = candidates[0];
             core.info(`Selected cluster '${selected.cluster}' from env '${envName}'.`);
           }
 
@@ -116,6 +199,7 @@ runs:
           core.setOutput('cluster', cluster);
           core.setOutput('dns_zone', dnsZone);
           core.setOutput('container_registry', registry);
+          core.setOutput('cloud', cloudOf(selected));
           core.setOutput('uami_map', JSON.stringify(uami));
           core.setOutput('namespace', process.env.NAMESPACE);
 
@@ -196,4 +280,5 @@ runs:
         echo "container_registry=${{ steps.env.outputs.container_registry }}" >> "$GITHUB_OUTPUT"
         echo "uami_vars_b64=${{ steps.uami.outputs.uami_vars_b64 }}" >> "$GITHUB_OUTPUT"
         echo "cd_root=${{ steps.cdroot.outputs.cd_root }}" >> "$GITHUB_OUTPUT"
+        echo "cloud=${{ steps.env.outputs.cloud }}" >> "$GITHUB_OUTPUT"
 

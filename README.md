@@ -43,6 +43,7 @@ It’s a **turnkey GitOps automation platform** for AWS and Azure — combining 
 | `env_map` | Inline JSON `env_map` defining environments, clusters, DNS zones, and UAMI maps. | ❌ No | — |
 | `target_environment` | Logical environment name (e.g., prod, qa). | ✅ Yes | — |
 | `target_cluster` | Optional cluster override to directly select a cluster. | ❌ No | — |
+| `target_cloud` | Cloud (`aws` \| `azure`) used to choose between clusters of the same environment. Ignored when `target_cluster` is set; inferred from the runner when omitted. | ❌ No | — |
 | `namespace` | Kubernetes namespace for the deployment context. | ✅ Yes | — |
 | `delete_only` | Skip UAMI export if true. | ❌ No | `false` |
 
@@ -57,6 +58,7 @@ It’s a **turnkey GitOps automation platform** for AWS and Azure — combining 
 | `container_registry` | Container registry associated with the cluster. |
 | `uami_vars` | Flattened JSON map of `uami_name → client_id`. |
 | `cd_root` | Continuous-deployment repo path for the selected cluster and namespace. |
+| `cloud` | Selected cluster's cloud (`aws` \| `azure`). Empty when the `env_map` does not declare one. |
 
 ---
 
@@ -97,6 +99,32 @@ This action is used by higher-level workflows such as:
 
 ---
 
+## 🧭 Which cluster is selected
+
+In order, first match wins:
+
+1. **`target_cluster`** — names one cluster, searched across every environment.
+   Nothing else is consulted. If `target_cloud` was also given and disagrees, it
+   is ignored with a warning rather than failing: the cluster was named
+   explicitly, so it is what the caller meant.
+2. **`target_cloud`** — keeps the environment's clusters in that cloud. A
+   cluster whose entry declares no `cloud` is never discarded by this filter, so
+   an `env_map` written before the field existed resolves exactly as it did
+   before. If the environment has clusters and none are in that cloud, the run
+   fails and says which clouds it does have.
+3. **The runner's own cloud**, detected via
+   [`detect-cloud`](https://github.com/gitopsmanager/detect-cloud) — used **only
+   to break a tie** between clusters of one environment, and only when nothing
+   above resolved it. It is never a veto: a single-cluster environment is
+   selected without consulting it at all, so a runner deploying across a VPN to
+   the other cloud is unaffected. When it does decide, it says so with a
+   warning.
+
+If a choice still remains, the run fails and lists the candidates with their
+clouds.
+
+---
+
 ## 📦 Example `env_map` JSON
 
 ```json
@@ -105,6 +133,7 @@ This action is used by higher-level workflows such as:
     "clusters": [
       {
         "cluster": "aks-prod-weu",
+        "cloud": "azure",
         "dns_zone": "prod.affinity7software.com",
         "container_registry": "acrprod.azurecr.io",
         "uami_map": [
@@ -118,6 +147,7 @@ This action is used by higher-level workflows such as:
     "clusters": [
       {
         "cluster": "aks-staging-weu",
+        "cloud": "azure",
         "dns_zone": "staging.affinity7software.com",
         "container_registry": "acrstaging.azurecr.io"
       }
