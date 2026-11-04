@@ -178,7 +178,7 @@ From now on, they will always follow these simple, reliable rules:
 - **`@v1.4.7`** → Frozen snapshot for exact reproducibility.
 
 All tags will now **increment forward permanently** — no re-use or re-tagging of old versions.  
-This marks the **official release** of the action under the **Affinity7 Consulting** stable versioning model.
+This marks the **official release** of the action under the **GitOps Manager** stable versioning model.
 
 ## 🧩 Dependencies
 
@@ -190,4 +190,4 @@ This marks the **official release** of the action under the **Affinity7 Consulti
 
 ## 📄 License
 
-MIT License © Affinity7 Consulting Ltd
+MIT License © GitOps Manager, S.L.

@@ -4,7 +4,7 @@ description: >
   and flatten the UAMI map (uami_name → client_id). 
   Provides cluster, dns_zone, and UAMI mapping for downstream steps.
 
-author: Affinity7 Consulting Ltd
+author: GitOps Manager, S.L.
 branding:
   icon: cloud
   color: blue
