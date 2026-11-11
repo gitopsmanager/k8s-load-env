@@ -134,7 +134,7 @@ clouds.
       {
         "cluster": "aks-prod-weu",
         "cloud": "azure",
-        "dns_zone": "prod.affinity7software.com",
+        "dns_zone": "prod.example.com",
         "container_registry": "acrprod.azurecr.io",
         "uami_map": [
           { "uami_name": "aks-prod-weu-agent", "client_id": "b44b..." },
@@ -148,7 +148,7 @@ clouds.
       {
         "cluster": "aks-staging-weu",
         "cloud": "azure",
-        "dns_zone": "staging.affinity7software.com",
+        "dns_zone": "staging.example.com",
         "container_registry": "acrstaging.azurecr.io"
       }
     ]
